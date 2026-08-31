@@ -162,7 +162,7 @@ def generate_reply(messages: list[Message]) -> tuple[str, bool, str | None]:
     The [ESCALATE] marker is stripped before the text is sent to the guest.
     """
     settings = get_settings()
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)
 
     system_prompt = SYSTEM_PROMPT + _load_knowledge_base_text()
     claude_messages = _history_to_claude_messages(messages)

@@ -10,6 +10,10 @@ class Settings:
     # Anthropic / Claude
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
+    # Опционально: адрес прокси, совместимого с Anthropic API (например
+    # https://api.proxyapi.ru/anthropic) — для оплаты в рублях без карты
+    # зарубежного банка. Пусто = обращаться напрямую к api.anthropic.com.
+    anthropic_base_url: str = os.environ.get("ANTHROPIC_BASE_URL", "").strip() or None
 
     # Avito
     avito_client_id: str = os.environ.get("AVITO_CLIENT_ID", "")
