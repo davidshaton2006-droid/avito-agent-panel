@@ -1,0 +1,23 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+
+# Env files
+.env
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Firebase service account (never commit real keys)
+*serviceAccount*.json
+firebase-adminsdk*.json
+
+# OS / editor
+.DS_Store
+.vscode/
