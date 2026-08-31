@@ -1,12 +1,10 @@
 """
 Клиент для Avito Messenger API.
 
-ВАЖНО: основан на предоставленном референсном коде (документированные
-официальные принципы работы Avito API: OAuth2 client_credentials, вебхуки,
-методы для чатов/сообщений). Точные названия полей в JSON вебхука и
-эндпоинтов нужно сверить с реальной документацией на developers.avito.ru
-после получения доступа — она закрытая. Места, где это критично, помечены
-TODO ниже; поправь их по факту первого реального вебхука.
+Сверено с официальной OpenAPI-схемой (swagger.json), полученной из
+документации Avito для бизнеса. Используется OAuth2 client_credentials —
+доступ к возможностям своей же учётной записи (аккаунт базы отдыха), без
+авторизации от имени других пользователей.
 """
 
 import logging
@@ -55,6 +53,7 @@ def _auth_headers() -> dict:
 
 
 def subscribe_webhook(callback_url: str):
+    """POST /messenger/v3/webhook — регистрирует URL для вебхуков."""
     response = requests.post(
         f"{API_BASE}/messenger/v3/webhook",
         headers=_auth_headers(),
@@ -66,54 +65,98 @@ def subscribe_webhook(callback_url: str):
 
 
 def send_message(chat_id: str, text: str):
+    """POST /messenger/v1/accounts/{user_id}/chats/{chat_id}/messages — на данный
+    момент Avito поддерживает в этом методе только текстовые сообщения."""
     settings = get_settings()
     response = requests.post(
         f"{API_BASE}/messenger/v1/accounts/{settings.avito_user_id}/chats/{chat_id}/messages",
         headers=_auth_headers(),
-        json={"message": {"text": text}, "type": "text"},
+        json={"type": "text", "message": {"text": text}},
         timeout=10,
     )
     response.raise_for_status()
     return response.json()
 
 
+def get_chat(chat_id: str) -> dict:
+    """GET /messenger/v2/accounts/{user_id}/chats/{chat_id} — данные чата: список
+    участников (с именами) и контекст (например, объявление, по которому чат)."""
+    settings = get_settings()
+    response = requests.get(
+        f"{API_BASE}/messenger/v2/accounts/{settings.avito_user_id}/chats/{chat_id}",
+        headers=_auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_guest_name(chat_id: str, own_user_id: str) -> str | None:
+    """Вебхук не содержит имени отправителя, поэтому имя гостя достаём отдельным
+    запросом чата: берём первого участника, который не является нашим аккаунтом."""
+    try:
+        chat = get_chat(chat_id)
+    except requests.RequestException:
+        log.exception("Не удалось получить данные чата %s для определения имени гостя", chat_id)
+        return None
+
+    for user in chat.get("users", []):
+        if str(user.get("id")) != str(own_user_id):
+            return user.get("name")
+    return None
+
+
 def get_chat_url(chat_id: str) -> str:
-    """Ссылка на переписку в веб-версии Avito, для уведомлений админу."""
-    # TODO: сверить реальный формат ссылки на чат после первого доступа к API —
-    # это предположительный (наиболее вероятный) вид URL мессенджера Avito.
+    """Ссылка на переписку в веб-версии Avito, для уведомлений админу.
+
+    В OpenAPI-схеме Messenger API такого поля нет (это чисто API для интеграций,
+    без веб-адресов), поэтому используем предположительный, но стандартный для
+    Avito формат ссылки на диалог в личном кабинете.
+    """
     return f"https://www.avito.ru/profile/messenger/channel/{chat_id}"
 
 
 def parse_webhook_payload(raw: dict) -> dict:
     """
-    Разбирает сырой JSON вебхука Avito в плоскую структуру, с которой удобно
-    работать остальному приложению.
-
-    TODO: после первого реального вебхука проверить:
-    - точное имя поля с типом сообщения (image/text/...)
-    - как именно передаётся URL фото (message.content.image.sizes["1280x960"]
-      судя по открытым интеграциям с Avito API, но требует подтверждения)
-    - поле с именем гостя (author_name / user.name / etc.)
+    Разбирает сырой JSON вебхука Avito (схема WebhookMessage внутри
+    payload.value) в плоскую структуру, с которой удобно работать остальному
+    приложению.
     """
     log.info("Сырой webhook payload от Avito: %s", raw)
-    payload = raw.get("payload", raw)
-    message = payload.get("message", {})
-    content = message.get("content", {})
+    payload = raw.get("payload", {})
 
-    message_type = message.get("type", "text")
+    if payload.get("type") != "message":
+        # Пока в схеме API есть только тип "message", но на будущее игнорируем
+        # неизвестные типы уведомлений вместо падения.
+        return {"chat_id": None}
+
+    value = payload.get("value", {})
+    content = value.get("content", {}) or {}
+
+    message_type = value.get("type", "text")
+    text = content.get("text") or ""
     image_url = None
+
     if message_type == "image":
-        image = content.get("image", {})
-        sizes = image.get("sizes", {})
-        # Берём самую большую доступную картинку
-        image_url = next(iter(sizes.values()), None) if sizes else image.get("url")
+        sizes = (content.get("image") or {}).get("sizes", {})
+        # Берём самую большую доступную картинку (обычно "1280x960")
+        image_url = sizes.get("1280x960") or next(iter(sizes.values()), None)
+    elif message_type == "location":
+        location = content.get("location") or {}
+        text = location.get("text") or location.get("title") or ""
+    elif message_type == "link":
+        link = content.get("link") or {}
+        text = link.get("url") or link.get("text") or ""
+    elif message_type == "item":
+        item = content.get("item") or {}
+        text = f"{item.get('title', '')} {item.get('item_url', '')}".strip()
 
     return {
-        "chat_id": payload.get("chat_id"),
-        "text": message.get("text") or content.get("text", ""),
-        "author_id": message.get("author_id"),
-        "author_name": payload.get("author_name") or payload.get("user", {}).get("name"),
-        "item_id": payload.get("item_id"),
+        "chat_id": value.get("chat_id"),
+        "text": text,
+        "author_id": value.get("author_id"),
+        "own_user_id": value.get("user_id"),
+        "item_id": value.get("item_id"),
         "message_type": message_type,
         "image_url": image_url,
     }
