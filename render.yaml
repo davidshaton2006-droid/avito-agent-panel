@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: avito-agent-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-5
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: JWT_EXPIRES_MINUTES
+        value: "1440"
+      - key: CORS_ORIGINS
+        value: https://davidshaton2006-droid.github.io
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AVITO_CLIENT_ID
+        sync: false
+      - key: AVITO_CLIENT_SECRET
+        sync: false
+      - key: AVITO_USER_ID
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ADMIN_CHAT_ID
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        value: avito-agent-panel
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        sync: false
