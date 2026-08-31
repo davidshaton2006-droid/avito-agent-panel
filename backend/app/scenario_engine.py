@@ -10,6 +10,8 @@
 
 import logging
 
+from google.cloud.firestore_v1.base_query import FieldFilter
+
 from app.avito_client import get_chat_url, send_message
 from app.firestore_db import SCENARIOS_COLLECTION, get_db
 from app.models import Conversation, Scenario
@@ -20,7 +22,7 @@ log = logging.getLogger("scenario-engine")
 
 def find_matching_scenario(text: str) -> Scenario | None:
     db = get_db()
-    docs = db.collection(SCENARIOS_COLLECTION).where("isActive", "==", True).stream()
+    docs = db.collection(SCENARIOS_COLLECTION).where(filter=FieldFilter("isActive", "==", True)).stream()
     normalized = text.strip().lower()
     for doc in docs:
         data = doc.to_dict()

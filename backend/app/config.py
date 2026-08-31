@@ -9,7 +9,7 @@ load_dotenv()
 class Settings:
     # Anthropic / Claude
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
-    claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+    claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 
     # Avito
     avito_client_id: str = os.environ.get("AVITO_CLIENT_ID", "")

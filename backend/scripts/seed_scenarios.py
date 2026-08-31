@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: E402
+
 from app.firestore_db import SCENARIOS_COLLECTION, get_db  # noqa: E402
 
 PAYMENT_SCENARIO = {
@@ -31,7 +33,9 @@ def main():
     db = get_db()
     collection = db.collection(SCENARIOS_COLLECTION)
 
-    existing = list(collection.where("scenarioId", "==", PAYMENT_SCENARIO["scenarioId"]).limit(1).stream())
+    existing = list(
+        collection.where(filter=FieldFilter("scenarioId", "==", PAYMENT_SCENARIO["scenarioId"])).limit(1).stream()
+    )
     if existing:
         print("Сценарий 'payment_confirmation' уже существует — пропускаем.")
         return
