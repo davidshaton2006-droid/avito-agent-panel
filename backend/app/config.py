@@ -9,7 +9,7 @@ load_dotenv()
 class Settings:
     # Anthropic / Claude
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
-    claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
+    claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
     # Опционально: адрес прокси, совместимого с Anthropic API (например
     # https://api.proxyapi.ru/anthropic) — для оплаты в рублях без карты
     # зарубежного банка. Пусто = обращаться напрямую к api.anthropic.com.
@@ -24,9 +24,14 @@ class Settings:
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_admin_chat_id: str = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
 
-    # Firebase
+    # Firebase (проект самого агента: база знаний, переписки, сценарии)
     firebase_service_account_json: str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
     firebase_project_id: str = os.environ.get("FIREBASE_PROJECT_ID", "")
+
+    # Firebase сайта бронирования (romatik-client2) — только для чтения
+    # актуальной доступности домиков, отдельный проект и сервисный аккаунт.
+    booking_firebase_service_account_json: str = os.environ.get("BOOKING_FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    booking_firebase_project_id: str = os.environ.get("BOOKING_FIREBASE_PROJECT_ID", "romantik-client")
 
     # Admin auth
     admin_username: str = os.environ.get("ADMIN_USERNAME", "admin")

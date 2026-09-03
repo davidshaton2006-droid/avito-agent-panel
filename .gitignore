@@ -16,7 +16,7 @@ frontend/dist/
 
 # Firebase service account (never commit real keys)
 *serviceAccount*.json
-firebase-adminsdk*.json
+*firebase-adminsdk*.json
 
 # OS / editor
 .DS_Store

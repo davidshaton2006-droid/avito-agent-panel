@@ -1,8 +1,10 @@
+import datetime as dt
 import logging
 import re
 
 import anthropic
 
+from app.booking_availability import check_availability
 from app.config import get_settings
 from app.firestore_db import KNOWLEDGE_BASE_COLLECTION, get_db
 from app.models import Message
@@ -78,8 +80,11 @@ SYSTEM_PROMPT = """\
 что после этого администратор проверит поступление и подтвердит бронь.
 Онлайн-оплаты на сайте сейчас нет — только через перевод.
 
-Если гость спрашивает про доступность на конкретные даты — не
-изобретай ответ, спроси даты и количество гостей и скажи, что уточнишь.
+Если гость называет конкретные даты заезда и выезда — используй инструмент
+check_availability, чтобы посмотреть реальную доступность домиков на сайте
+бронирования, и отвечай на основе его результата. Если дат ещё нет — сначала
+спроси даты и количество гостей. Если инструмент вернул ошибку (синхронизация
+недоступна) — не изобретай цифры, честно скажи, что уточнишь у администратора.
 
 # СКИДКИ
 Подписчикам соцсетей — скидка 5% на проживание. Скидки за рекламу и
@@ -145,6 +150,33 @@ def _load_knowledge_base_text() -> str:
     )
 
 
+TOOLS = [
+    {
+        "name": "check_availability",
+        "description": (
+            "Проверяет реальную доступность домиков на сайте бронирования на "
+            "заданный период (пересечение с уже существующими бронированиями). "
+            "Возвращает количество свободных из 7 двухместных и 10 трёхместных "
+            "домиков на эти даты."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "check_in": {"type": "string", "description": "Дата заезда, формат YYYY-MM-DD"},
+                "check_out": {"type": "string", "description": "Дата выезда, формат YYYY-MM-DD"},
+            },
+            "required": ["check_in", "check_out"],
+        },
+    }
+]
+
+
+def _run_tool(name: str, tool_input: dict) -> dict:
+    if name == "check_availability":
+        return check_availability(tool_input.get("check_in", ""), tool_input.get("check_out", ""))
+    return {"error": f"Неизвестный инструмент: {name}"}
+
+
 def _history_to_claude_messages(messages: list[Message]) -> list[dict]:
     result = []
     for m in messages:
@@ -164,16 +196,33 @@ def generate_reply(messages: list[Message]) -> tuple[str, bool, str | None]:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)
 
-    system_prompt = SYSTEM_PROMPT + _load_knowledge_base_text()
+    today = dt.date.today().isoformat()
+    system_prompt = f"Сегодняшняя дата: {today}.\n\n" + SYSTEM_PROMPT + _load_knowledge_base_text()
     claude_messages = _history_to_claude_messages(messages)
 
-    response = client.messages.create(
-        model=settings.claude_model,
-        max_tokens=1024,
-        system=system_prompt,
-        messages=claude_messages,
-    )
-    raw_text = "".join(block.text for block in response.content if block.type == "text").strip()
+    raw_text = ""
+    for _ in range(3):  # предохранитель от зацикливания на вызовах инструментов
+        response = client.messages.create(
+            model=settings.claude_model,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=claude_messages,
+            tools=TOOLS,
+        )
+        raw_text = "".join(block.text for block in response.content if block.type == "text").strip()
+
+        if response.stop_reason != "tool_use":
+            break
+
+        claude_messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                result = _run_tool(block.name, block.input)
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": str(result)}
+                )
+        claude_messages.append({"role": "user", "content": tool_results})
 
     match = ESCALATE_PATTERN.search(raw_text)
     if match:
