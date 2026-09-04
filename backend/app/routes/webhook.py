@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, Request
 
+from app.agent_settings import get_agent_settings
 from app.avito_client import get_guest_name, parse_webhook_payload, send_message
 from app.claude_agent import generate_reply
 from app.config import get_settings
@@ -99,6 +100,18 @@ async def avito_webhook(request: Request):
     send_conversation_message(
         f"👤 {text}" + (f"\n📎 {image_url}" if image_url else ""), conversation.telegramThreadId
     )
+
+    agent_settings = get_agent_settings()
+    allowed_items = {str(i) for i in agent_settings.get("allowedItemIds") or []}
+    item_id = parsed.get("item_id")
+    item_allowed = not allowed_items or (item_id is not None and str(item_id) in allowed_items)
+
+    if not agent_settings.get("isActive", True) or not item_allowed:
+        # Бот на паузе, либо это объявление не выбрано для автоответов —
+        # сообщение гостя всё равно сохранено и видно в Telegram-теме,
+        # но агент не отвечает — ждёт ручной реакции администратора.
+        _save_conversation(conversation)
+        return {"ok": True}
 
     if conversation.activeScenarioId:
         outgoing = continue_scenario(conversation, text, image_url)

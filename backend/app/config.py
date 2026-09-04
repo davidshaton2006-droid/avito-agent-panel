@@ -23,6 +23,10 @@ class Settings:
     # Telegram
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_admin_chat_id: str = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
+    # Секрет, который Telegram присылает обратно в заголовке
+    # X-Telegram-Bot-Api-Secret-Token — подтверждает, что вебхук реально
+    # пришёл от Telegram, а не от кого-то ещё, кто угадал наш URL.
+    telegram_webhook_secret: str = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
     # Firebase (проект самого агента: база знаний, переписки, сценарии)
     firebase_service_account_json: str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")

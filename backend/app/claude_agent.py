@@ -4,6 +4,7 @@ import re
 
 import anthropic
 
+from app.agent_settings import get_agent_settings
 from app.travelline_pms import check_availability
 from app.config import get_settings
 from app.firestore_db import KNOWLEDGE_BASE_COLLECTION, get_db
@@ -13,12 +14,11 @@ log = logging.getLogger("claude-agent")
 
 ESCALATE_PATTERN = re.compile(r"\[ESCALATE\]\s*(.*)", re.IGNORECASE)
 
-SYSTEM_PROMPT = """\
-Ты — вежливый и живой администратор базы отдыха «Романтик». Отвечаешь
-гостям на Авито на вопросы о базе и бронировании. Общаешься тепло,
-по делу, без канцелярита и без шаблонных фраз в духе "Спасибо за
-обращение!".
-
+# Статические факты о базе — цены, правила, контакты и т.п. Не редактируются
+# через Telegram/панель (это risk-critical данные), в отличие от профиля
+# агента (имя/компания/товары/цель) и базы знаний, которые собираются
+# отдельно в _build_system_prompt().
+STATIC_FACTS = """\
 # О БАЗЕ
 База отдыха «Романтик» — эко-база в сосновом бору с дубами, в Северском
 районе Краснодарского края, станица Ставропольская, примерно 40 км
@@ -132,7 +132,7 @@ check_availability, чтобы посмотреть реальную досту�
 """
 
 
-def _load_knowledge_base_text() -> str:
+def _load_knowledge_base_text(free_text: str) -> str:
     db = get_db()
     docs = db.collection(KNOWLEDGE_BASE_COLLECTION).stream()
     pairs = []
@@ -142,12 +142,32 @@ def _load_knowledge_base_text() -> str:
         answer = data.get("answer", "").strip()
         if question and answer:
             pairs.append(f"В: {question}\nО: {answer}")
-    if not pairs:
+
+    sections = []
+    if pairs:
+        sections.append(
+            "# ДОПОЛНИТЕЛЬНАЯ БАЗА ЗНАНИЙ (вопрос-ответ, редактируется админом)\n"
+            + "\n\n".join(pairs)
+        )
+    if free_text and free_text.strip():
+        sections.append("# ДОПОЛНИТЕЛЬНАЯ БАЗА ЗНАНИЙ (свободный текст, редактируется админом)\n" + free_text.strip())
+
+    if not sections:
         return ""
-    return (
-        "\n\n# ДОПОЛНИТЕЛЬНАЯ БАЗА ЗНАНИЙ (вопрос-ответ, редактируется админом)\n"
-        + "\n\n".join(pairs)
+    return "\n\n" + "\n\n".join(sections)
+
+
+def _build_system_prompt() -> str:
+    profile = get_agent_settings()
+    today = dt.date.today().isoformat()
+
+    header = (
+        f"Сегодняшняя дата: {today}.\n\n"
+        f"Ты — {profile['name']}, представитель компании «{profile['company']}».\n"
+        f"Товары/услуги: {profile['products']}\n\n"
+        f"{profile['goal']}\n\n"
     )
+    return header + STATIC_FACTS + _load_knowledge_base_text(profile.get("knowledgeBaseText", ""))
 
 
 TOOLS = [
@@ -196,8 +216,7 @@ def generate_reply(messages: list[Message]) -> tuple[str, bool, str | None]:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)
 
-    today = dt.date.today().isoformat()
-    system_prompt = f"Сегодняшняя дата: {today}.\n\n" + SYSTEM_PROMPT + _load_knowledge_base_text()
+    system_prompt = _build_system_prompt()
     claude_messages = _history_to_claude_messages(messages)
 
     raw_text = ""

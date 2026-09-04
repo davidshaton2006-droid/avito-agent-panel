@@ -16,6 +16,9 @@ from app.config import get_settings
 KNOWLEDGE_BASE_COLLECTION = "avito_agent_knowledge_base"
 CONVERSATIONS_COLLECTION = "avito_agent_conversations"
 SCENARIOS_COLLECTION = "avito_agent_scenarios"
+SETTINGS_COLLECTION = "avito_agent_settings"
+SETTINGS_DOC_ID = "config"
+TELEGRAM_STATE_COLLECTION = "avito_agent_telegram_state"
 
 
 @lru_cache

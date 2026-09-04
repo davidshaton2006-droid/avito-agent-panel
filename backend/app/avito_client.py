@@ -78,6 +78,29 @@ def send_message(chat_id: str, text: str):
     return response.json()
 
 
+def list_items(status: str = "active") -> list[dict]:
+    """GET /core/v1/items — объявления аккаунта (для выбора, на какие из них
+    должен отвечать агент). Возвращает список {id, title, status, url, ...},
+    страницы собираются в один список (per_page=100)."""
+    items: list[dict] = []
+    page = 1
+    while True:
+        response = requests.get(
+            f"{API_BASE}/core/v1/items",
+            headers=_auth_headers(),
+            params={"status": status, "page": page, "per_page": 100},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        page_items = data.get("resources") or []
+        items.extend(page_items)
+        if len(page_items) < 100:
+            break
+        page += 1
+    return items
+
+
 def get_chat(chat_id: str) -> dict:
     """GET /messenger/v2/accounts/{user_id}/chats/{chat_id} — данные чата: список
     участников (с именами) и контекст (например, объявление, по которому чат)."""

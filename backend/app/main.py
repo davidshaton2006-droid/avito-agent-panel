@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routes import auth, conversations, knowledge_base, scenarios, webhook
+from app.routes import auth, conversations, knowledge_base, scenarios, telegram_webhook, webhook
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,6 +25,7 @@ app.include_router(knowledge_base.router)
 app.include_router(conversations.router)
 app.include_router(scenarios.router)
 app.include_router(webhook.router)
+app.include_router(telegram_webhook.router)
 
 
 @app.get("/health")
