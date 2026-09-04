@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.firestore_db import CONVERSATIONS_COLLECTION, get_db
 from app.models import Conversation, Message
 from app.scenario_engine import continue_scenario, find_matching_scenario, start_scenario
-from app.telegram_notify import notify_admin
+from app.telegram_notify import create_conversation_topic, notify_admin, send_conversation_message
 
 log = logging.getLogger("webhook")
 
@@ -38,6 +38,7 @@ def _get_or_create_conversation(chat_id: str, item_id: str | None, own_user_id: 
         createdAt=now,
         updatedAt=now,
     )
+    conversation.telegramThreadId = create_conversation_topic(guest_name or f"Чат {chat_id}")
     ref.set(conversation.model_dump(exclude={"id"}))
     return conversation
 
@@ -57,6 +58,7 @@ def _send_and_record(conversation: Conversation, text: str) -> None:
     conversation.messages.append(
         Message(role="agent", text=text, timestamp=dt.datetime.now(dt.timezone.utc).isoformat())
     )
+    send_conversation_message(f"🤖 {text}", conversation.telegramThreadId)
 
 
 @router.post("/webhook/avito")
@@ -94,6 +96,9 @@ async def avito_webhook(request: Request):
         imageUrl=image_url,
     )
     conversation.messages.append(guest_message)
+    send_conversation_message(
+        f"👤 {text}" + (f"\n📎 {image_url}" if image_url else ""), conversation.telegramThreadId
+    )
 
     if conversation.activeScenarioId:
         outgoing = continue_scenario(conversation, text, image_url)

@@ -38,6 +38,10 @@ class Conversation(BaseModel):
     activeStepIndex: Optional[int] = None
     scenarioData: dict = Field(default_factory=dict)
 
+    # Telegram forum topic this conversation is mirrored into, if any
+    # (see telegram_notify.create_conversation_topic)
+    telegramThreadId: Optional[int] = None
+
 
 class ScenarioStep(BaseModel):
     type: Literal["message", "wait_photo", "wait_text", "notify_admin"]

@@ -6,6 +6,7 @@ from app.avito_client import send_message
 from app.firestore_db import CONVERSATIONS_COLLECTION, get_db
 from app.models import Conversation, Message, SendMessageRequest
 from app.security import require_admin
+from app.telegram_notify import send_conversation_message
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"], dependencies=[Depends(require_admin)])
 
@@ -43,6 +44,7 @@ def send_admin_message(conversation_id: str, payload: SendMessageRequest):
     conversation.messages.append(Message(role="admin", text=payload.text, timestamp=now))
     conversation.updatedAt = now
     ref.update({"messages": [m.model_dump() for m in conversation.messages], "updatedAt": now})
+    send_conversation_message(f"🧑‍💼 {payload.text}", conversation.telegramThreadId)
     return conversation
 
 
