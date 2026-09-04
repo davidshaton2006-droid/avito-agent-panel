@@ -4,7 +4,7 @@ import re
 
 import anthropic
 
-from app.booking_availability import check_availability
+from app.travelline_pms import check_availability
 from app.config import get_settings
 from app.firestore_db import KNOWLEDGE_BASE_COLLECTION, get_db
 from app.models import Message

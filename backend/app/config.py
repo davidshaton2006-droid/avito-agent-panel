@@ -28,10 +28,12 @@ class Settings:
     firebase_service_account_json: str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
     firebase_project_id: str = os.environ.get("FIREBASE_PROJECT_ID", "")
 
-    # Firebase сайта бронирования (romatik-client2) — только для чтения
-    # актуальной доступности домиков, отдельный проект и сервисный аккаунт.
-    booking_firebase_service_account_json: str = os.environ.get("BOOKING_FIREBASE_SERVICE_ACCOUNT_JSON", "")
-    booking_firebase_project_id: str = os.environ.get("BOOKING_FIREBASE_PROJECT_ID", "romantik-client")
+    # TravelLine PMS API — отдельное подключение (не связано с Cloudflare-воркером
+    # romatik-client2), только для чтения реальной доступности по номерам/броням.
+    # Требует тариф с включённым PMS API (не работает на LITE без доплаты).
+    travelline_client_id: str = os.environ.get("TRAVELLINE_CLIENT_ID", "")
+    travelline_client_secret: str = os.environ.get("TRAVELLINE_CLIENT_SECRET", "")
+    travelline_property_id: str = os.environ.get("TRAVELLINE_PROPERTY_ID", "68306")
 
     # Admin auth
     admin_username: str = os.environ.get("ADMIN_USERNAME", "admin")
