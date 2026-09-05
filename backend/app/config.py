@@ -20,11 +20,10 @@ class Settings:
     avito_client_secret: str = os.environ.get("AVITO_CLIENT_SECRET", "")
     avito_user_id: str = os.environ.get("AVITO_USER_ID", "")
 
-    # Instagram (Meta Graph API, страница Facebook привязана к Instagram-аккаунту —
-    # тот же путь, что используют внешние интеграторы вроде ChatPlace)
-    instagram_page_access_token: str = os.environ.get("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
-    instagram_page_id: str = os.environ.get("INSTAGRAM_PAGE_ID", "")
-    instagram_ig_business_id: str = os.environ.get("INSTAGRAM_IG_BUSINESS_ID", "")
+    # Instagram API with Instagram Login (отдельный вход, без Facebook-страницы —
+    # раздел "Настройка API для входа в Instagram" в Meta for Developers)
+    instagram_access_token: str = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+    instagram_ig_user_id: str = os.environ.get("INSTAGRAM_IG_USER_ID", "")
     instagram_app_secret: str = os.environ.get("INSTAGRAM_APP_SECRET", "")
     # Придумываем сами и указываем то же значение при подписке вебхука в Meta
     instagram_webhook_verify_token: str = os.environ.get("INSTAGRAM_WEBHOOK_VERIFY_TOKEN", "")

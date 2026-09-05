@@ -1,13 +1,12 @@
 """
-Клиент для Instagram Messaging API через Meta Graph API — вариант с
-Instagram-аккаунтом, привязанным к Facebook-странице (тот же путь, что
-используют внешние интеграторы вроде ChatPlace): отправка сообщений и
-проверка подписи идут через graph.facebook.com с Page Access Token.
+Клиент для Instagram API with Instagram Login (Meta) — отдельный вход,
+без привязки к Facebook-странице (в приложении Meta это раздел
+"Настройка API для входа в Instagram" / API setup with Instagram login).
 
-Если позже окажется, что реально используется отдельный вход через
-Instagram Login (graph.instagram.com, Instagram User Access Token) —
-достаточно поменять API_BASE и заголовок авторизации ниже, форма
-вебхук-пейлоада (entry[].messaging[]) у обоих вариантов одинаковая.
+Работает через graph.instagram.com, авторизация — Instagram User Access
+Token, сгенерированный для конкретного Instagram-аккаунта (romantik_base)
+в этом разделе приложения. Разрешения: instagram_business_basic,
+instagram_business_manage_comments, instagram_business_manage_messages.
 """
 
 import hashlib
@@ -20,15 +19,15 @@ from app.config import get_settings
 
 log = logging.getLogger("instagram-client")
 
-API_BASE = "https://graph.facebook.com/v21.0"
+API_BASE = "https://graph.instagram.com/v21.0"
 
 
 def send_message(recipient_id: str, text: str):
-    """POST /{page_id}/messages — отправка текстового сообщения в личку Instagram."""
+    """POST /{ig_user_id}/messages — отправка текстового сообщения в личку Instagram."""
     settings = get_settings()
     response = requests.post(
-        f"{API_BASE}/{settings.instagram_page_id}/messages",
-        params={"access_token": settings.instagram_page_access_token},
+        f"{API_BASE}/{settings.instagram_ig_user_id}/messages",
+        params={"access_token": settings.instagram_access_token},
         json={
             "recipient": {"id": recipient_id},
             "message": {"text": text},
@@ -41,8 +40,8 @@ def send_message(recipient_id: str, text: str):
 
 
 def verify_signature(body: bytes, signature_header: str | None) -> bool:
-    """Проверяет заголовок X-Hub-Signature-256 (HMAC-SHA256 от app secret),
-    чтобы отличить настоящий вебхук Meta от подделки."""
+    """Проверяет заголовок X-Hub-Signature-256 (HMAC-SHA256 от Instagram App
+    Secret), чтобы отличить настоящий вебхук Meta от подделки."""
     if not signature_header or not signature_header.startswith("sha256="):
         return False
     settings = get_settings()
@@ -59,13 +58,14 @@ def verify_signature(body: bytes, signature_header: str | None) -> bool:
 
 def get_guest_name(sender_id: str) -> str | None:
     """GET /{ig_scoped_id}?fields=name,username — имя/юзернейм отправителя.
-    Instagram отдаёт IGSID (id, привязанный к конкретной странице), не сам
-    Instagram user id, поэтому запрос идёт напрямую по этому id."""
+    Instagram отдаёт IGSID (id, привязанный к конкретному Instagram-аккаунту
+    получателя), не сам Instagram user id, поэтому запрос идёт напрямую по
+    этому id."""
     settings = get_settings()
     try:
         response = requests.get(
             f"{API_BASE}/{sender_id}",
-            params={"fields": "name,username", "access_token": settings.instagram_page_access_token},
+            params={"fields": "name,username", "access_token": settings.instagram_access_token},
             timeout=10,
         )
         response.raise_for_status()
@@ -111,7 +111,7 @@ def parse_webhook_payload(raw: dict) -> dict | None:
                 "chat_id": sender_id,
                 "text": text,
                 "author_id": sender_id,
-                "own_user_id": settings.instagram_ig_business_id,
+                "own_user_id": settings.instagram_ig_user_id,
                 "item_id": None,
                 "image_url": image_url,
             }
