@@ -112,6 +112,31 @@ select {
   margin-bottom: 24px;
 }
 
+.channel-switcher {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.channel-tab {
+  flex: 1;
+  text-align: center;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.channel-tab.active {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+
 .sidebar nav {
   display: flex;
   flex-direction: column;

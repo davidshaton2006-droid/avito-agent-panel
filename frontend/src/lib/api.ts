@@ -1,6 +1,10 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const TOKEN_KEY = "avito_agent_token";
 
+export type Channel = "avito" | "instagram";
+export const CHANNELS: Channel[] = ["avito", "instagram"];
+export const CHANNEL_LABELS: Record<Channel, string> = { avito: "Avito", instagram: "Instagram" };
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -91,6 +95,16 @@ export interface Scenario {
   updatedAt?: string;
 }
 
+export interface AgentSettings {
+  isActive: boolean;
+  name: string;
+  company: string;
+  products: string;
+  goal: string;
+  knowledgeBaseText: string;
+  allowedItemIds: string[];
+}
+
 export const api = {
   login: (username: string, password: string) =>
     request<{ token: string }>("/api/auth/login", {
@@ -98,38 +112,48 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
 
-  listKnowledgeBase: () => request<KnowledgeBaseEntry[]>("/api/knowledge-base"),
-  createKnowledgeBaseEntry: (question: string, answer: string) =>
-    request<KnowledgeBaseEntry>("/api/knowledge-base", {
+  listKnowledgeBase: (channel: Channel) => request<KnowledgeBaseEntry[]>(`/api/${channel}/knowledge-base`),
+  createKnowledgeBaseEntry: (channel: Channel, question: string, answer: string) =>
+    request<KnowledgeBaseEntry>(`/api/${channel}/knowledge-base`, {
       method: "POST",
       body: JSON.stringify({ question, answer }),
     }),
-  updateKnowledgeBaseEntry: (id: string, question: string, answer: string) =>
-    request<KnowledgeBaseEntry>(`/api/knowledge-base/${id}`, {
+  updateKnowledgeBaseEntry: (channel: Channel, id: string, question: string, answer: string) =>
+    request<KnowledgeBaseEntry>(`/api/${channel}/knowledge-base/${id}`, {
       method: "PUT",
       body: JSON.stringify({ question, answer }),
     }),
-  deleteKnowledgeBaseEntry: (id: string) =>
-    request<{ ok: boolean }>(`/api/knowledge-base/${id}`, { method: "DELETE" }),
+  deleteKnowledgeBaseEntry: (channel: Channel, id: string) =>
+    request<{ ok: boolean }>(`/api/${channel}/knowledge-base/${id}`, { method: "DELETE" }),
 
-  listConversations: () => request<Conversation[]>("/api/conversations"),
-  getConversation: (id: string) => request<Conversation>(`/api/conversations/${id}`),
-  sendAdminMessage: (id: string, text: string) =>
-    request<Conversation>(`/api/conversations/${id}/send`, {
+  listConversations: (channel: Channel) => request<Conversation[]>(`/api/${channel}/conversations`),
+  getConversation: (channel: Channel, id: string) =>
+    request<Conversation>(`/api/${channel}/conversations/${id}`),
+  sendAdminMessage: (channel: Channel, id: string, text: string) =>
+    request<Conversation>(`/api/${channel}/conversations/${id}/send`, {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
-  setConversationStatus: (id: string, status: string) =>
-    request<Conversation>(`/api/conversations/${id}/status?status=${status}`, { method: "PATCH" }),
+  setConversationStatus: (channel: Channel, id: string, status: string) =>
+    request<Conversation>(`/api/${channel}/conversations/${id}/status?status=${status}`, {
+      method: "PATCH",
+    }),
 
-  listScenarios: () => request<Scenario[]>("/api/scenarios"),
-  updateScenario: (id: string, scenario: Scenario) =>
-    request<Scenario>(`/api/scenarios/${id}`, {
+  listScenarios: (channel: Channel) => request<Scenario[]>(`/api/${channel}/scenarios`),
+  updateScenario: (channel: Channel, id: string, scenario: Scenario) =>
+    request<Scenario>(`/api/${channel}/scenarios/${id}`, {
       method: "PUT",
       body: JSON.stringify(scenario),
     }),
-  toggleScenario: (id: string) =>
-    request<Scenario>(`/api/scenarios/${id}/toggle`, { method: "PATCH" }),
+  toggleScenario: (channel: Channel, id: string) =>
+    request<Scenario>(`/api/${channel}/scenarios/${id}/toggle`, { method: "PATCH" }),
+
+  getSettings: (channel: Channel) => request<AgentSettings>(`/api/${channel}/settings`),
+  updateSettings: (channel: Channel, patch: Partial<AgentSettings>) =>
+    request<AgentSettings>(`/api/${channel}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
 };
 
 export { ApiError };

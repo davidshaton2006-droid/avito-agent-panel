@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type Conversation } from "../lib/api";
+import { useParams } from "react-router-dom";
+import { api, type Channel, type Conversation } from "../lib/api";
 
 const STATUS_LABELS: Record<Conversation["status"], string> = {
   open: "Открыт",
@@ -8,6 +9,7 @@ const STATUS_LABELS: Record<Conversation["status"], string> = {
 };
 
 export default function ConversationsPage() {
+  const { channel } = useParams<{ channel: Channel }>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -15,27 +17,29 @@ export default function ConversationsPage() {
   const [sending, setSending] = useState(false);
 
   async function load() {
+    if (!channel) return;
     setLoading(true);
-    const data = await api.listConversations();
+    const data = await api.listConversations(channel);
     setConversations(data);
     setLoading(false);
     if (!selectedId && data.length > 0) setSelectedId(data[0].id);
   }
 
   useEffect(() => {
+    setSelectedId(null);
     load();
     const interval = setInterval(load, 15000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [channel]);
 
   const selected = conversations.find((c) => c.id === selectedId) || null;
 
   async function handleSend() {
-    if (!selected || !replyText.trim()) return;
+    if (!channel || !selected || !replyText.trim()) return;
     setSending(true);
     try {
-      const updated = await api.sendAdminMessage(selected.id, replyText.trim());
+      const updated = await api.sendAdminMessage(channel, selected.id, replyText.trim());
       setReplyText("");
       setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
     } finally {
@@ -44,8 +48,8 @@ export default function ConversationsPage() {
   }
 
   async function handleStatusChange(status: Conversation["status"]) {
-    if (!selected) return;
-    const updated = await api.setConversationStatus(selected.id, status);
+    if (!channel || !selected) return;
+    const updated = await api.setConversationStatus(channel, selected.id, status);
     setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   }
 

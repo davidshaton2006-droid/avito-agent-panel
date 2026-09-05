@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, type KnowledgeBaseEntry } from "../lib/api";
+import { useParams } from "react-router-dom";
+import { api, type Channel, type KnowledgeBaseEntry } from "../lib/api";
 
 export default function KnowledgeBasePage() {
+  const { channel } = useParams<{ channel: Channel }>();
   const [entries, setEntries] = useState<KnowledgeBaseEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,9 +15,10 @@ export default function KnowledgeBasePage() {
   const [editAnswer, setEditAnswer] = useState("");
 
   async function load() {
+    if (!channel) return;
     setLoading(true);
     try {
-      const data = await api.listKnowledgeBase();
+      const data = await api.listKnowledgeBase(channel);
       setEntries(data);
       setError(null);
     } catch (err) {
@@ -27,11 +30,12 @@ export default function KnowledgeBasePage() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel]);
 
   async function handleAdd() {
-    if (!newQuestion.trim() || !newAnswer.trim()) return;
-    await api.createKnowledgeBaseEntry(newQuestion.trim(), newAnswer.trim());
+    if (!channel || !newQuestion.trim() || !newAnswer.trim()) return;
+    await api.createKnowledgeBaseEntry(channel, newQuestion.trim(), newAnswer.trim());
     setNewQuestion("");
     setNewAnswer("");
     load();
@@ -44,14 +48,15 @@ export default function KnowledgeBasePage() {
   }
 
   async function saveEdit(id: string) {
-    await api.updateKnowledgeBaseEntry(id, editQuestion.trim(), editAnswer.trim());
+    if (!channel) return;
+    await api.updateKnowledgeBaseEntry(channel, id, editQuestion.trim(), editAnswer.trim());
     setEditingId(null);
     load();
   }
 
   async function remove(id: string) {
-    if (!confirm("Удалить эту пару вопрос-ответ?")) return;
-    await api.deleteKnowledgeBaseEntry(id);
+    if (!channel || !confirm("Удалить эту пару вопрос-ответ?")) return;
+    await api.deleteKnowledgeBaseEntry(channel, id);
     load();
   }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type Scenario } from "../lib/api";
+import { useParams } from "react-router-dom";
+import { api, type Channel, type Scenario } from "../lib/api";
 
 const STEP_LABELS: Record<Scenario["steps"][number]["type"], string> = {
   message: "Сообщение гостю",
@@ -9,14 +10,16 @@ const STEP_LABELS: Record<Scenario["steps"][number]["type"], string> = {
 };
 
 export default function ScenariosPage() {
+  const { channel } = useParams<{ channel: Channel }>();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, Scenario>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
   async function load() {
+    if (!channel) return;
     setLoading(true);
-    const data = await api.listScenarios();
+    const data = await api.listScenarios(channel);
     setScenarios(data);
     setDrafts(Object.fromEntries(data.map((s) => [s.id, s])));
     setLoading(false);
@@ -24,23 +27,26 @@ export default function ScenariosPage() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel]);
 
   function updateDraft(id: string, updater: (s: Scenario) => Scenario) {
     setDrafts((prev) => ({ ...prev, [id]: updater(prev[id]) }));
   }
 
   async function toggle(id: string) {
-    const updated = await api.toggleScenario(id);
+    if (!channel) return;
+    const updated = await api.toggleScenario(channel, id);
     setScenarios((prev) => prev.map((s) => (s.id === id ? updated : s)));
     setDrafts((prev) => ({ ...prev, [id]: updated }));
   }
 
   async function save(id: string) {
+    if (!channel) return;
     setSavingId(id);
     try {
       const draft = drafts[id];
-      const updated = await api.updateScenario(id, draft);
+      const updated = await api.updateScenario(channel, id, draft);
       setScenarios((prev) => prev.map((s) => (s.id === id ? updated : s)));
       setDrafts((prev) => ({ ...prev, [id]: updated }));
     } finally {
