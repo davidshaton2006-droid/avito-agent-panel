@@ -10,7 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.firestore_db import KNOWLEDGE_BASE_COLLECTION, get_db  # noqa: E402
+from app.firestore_db import get_db, knowledge_base_collection  # noqa: E402
+
+CHANNEL = "avito"
 
 QA_PAIRS = [
     ("Где находится база отдыха?", "Мы в Северском районе Краснодарского края, станица Ставропольская, примерно 40-45 минут от Краснодара, в сосновом бору с дубами."),
@@ -39,17 +41,18 @@ QA_PAIRS = [
 def main():
     db = get_db()
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-    collection = db.collection(KNOWLEDGE_BASE_COLLECTION)
+    collection_name = knowledge_base_collection(CHANNEL)
+    collection = db.collection(collection_name)
 
     existing = list(collection.limit(1).stream())
     if existing:
-        print("В avito_agent_knowledge_base уже есть записи — пропускаем сидирование, чтобы не дублировать.")
+        print(f"В {collection_name} уже есть записи — пропускаем сидирование, чтобы не дублировать.")
         return
 
     for question, answer in QA_PAIRS:
         collection.document().set({"question": question, "answer": answer, "updatedAt": now})
 
-    print(f"Загружено {len(QA_PAIRS)} пар вопрос-ответ в {KNOWLEDGE_BASE_COLLECTION}.")
+    print(f"Загружено {len(QA_PAIRS)} пар вопрос-ответ в {collection_name}.")
 
 
 if __name__ == "__main__":

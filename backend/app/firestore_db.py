@@ -1,24 +1,44 @@
 """
 Firestore access layer. Uses firebase-admin, initialized with a service
 account. Can point at the SAME Firebase project used by romatik-client2 —
-collections below are namespaced with an `avito_agent_` prefix specifically
-so they never collide with that site's booking data.
+collections are namespaced per messaging channel (`avito_agent_*`,
+`instagram_agent_*`, ...) so they never collide with that site's booking
+data, or with each other.
 """
 
 import json
 from functools import lru_cache
+from typing import Literal
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 
 from app.config import get_settings
 
-KNOWLEDGE_BASE_COLLECTION = "avito_agent_knowledge_base"
-CONVERSATIONS_COLLECTION = "avito_agent_conversations"
-SCENARIOS_COLLECTION = "avito_agent_scenarios"
-SETTINGS_COLLECTION = "avito_agent_settings"
+Channel = Literal["avito", "instagram"]
+CHANNELS: tuple[Channel, ...] = ("avito", "instagram")
+
 SETTINGS_DOC_ID = "config"
-TELEGRAM_STATE_COLLECTION = "avito_agent_telegram_state"
+
+
+def knowledge_base_collection(channel: Channel) -> str:
+    return f"{channel}_agent_knowledge_base"
+
+
+def conversations_collection(channel: Channel) -> str:
+    return f"{channel}_agent_conversations"
+
+
+def scenarios_collection(channel: Channel) -> str:
+    return f"{channel}_agent_scenarios"
+
+
+def settings_collection(channel: Channel) -> str:
+    return f"{channel}_agent_settings"
+
+
+def telegram_state_collection(channel: Channel) -> str:
+    return f"{channel}_agent_telegram_state"
 
 
 @lru_cache

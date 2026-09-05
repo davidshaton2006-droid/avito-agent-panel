@@ -1,65 +1,14 @@
-import datetime as dt
 import logging
 
 from fastapi import APIRouter, Request
 
-from app.agent_settings import get_agent_settings
-from app.avito_client import get_guest_name, parse_webhook_payload, send_message
-from app.claude_agent import generate_reply
+from app.avito_client import get_guest_name, parse_webhook_payload
 from app.config import get_settings
-from app.firestore_db import CONVERSATIONS_COLLECTION, get_db
-from app.models import Conversation, Message
-from app.scenario_engine import continue_scenario, find_matching_scenario, start_scenario
-from app.telegram_notify import create_conversation_topic, notify_admin, send_conversation_message
+from app.inbound_message import get_or_create_conversation, process_guest_message, save_conversation
 
 log = logging.getLogger("webhook")
 
 router = APIRouter(tags=["webhook"])
-
-
-def _get_or_create_conversation(chat_id: str, item_id: str | None, own_user_id: str) -> Conversation:
-    db = get_db()
-    ref = db.collection(CONVERSATIONS_COLLECTION).document(chat_id)
-    doc = ref.get()
-    now = dt.datetime.now(dt.timezone.utc).isoformat()
-    if doc.exists:
-        return Conversation(id=doc.id, **doc.to_dict())
-
-    # Вебхук не содержит имени отправителя — запрашиваем его только один раз,
-    # при первом сообщении в новом чате.
-    guest_name = get_guest_name(chat_id, own_user_id)
-
-    conversation = Conversation(
-        conversationId=chat_id,
-        guestName=guest_name,
-        chatId=chat_id,
-        itemId=item_id,
-        messages=[],
-        status="open",
-        createdAt=now,
-        updatedAt=now,
-    )
-    conversation.telegramThreadId = create_conversation_topic(guest_name or f"Чат {chat_id}")
-    ref.set(conversation.model_dump(exclude={"id"}))
-    return conversation
-
-
-def _save_conversation(conversation: Conversation) -> None:
-    db = get_db()
-    conversation.updatedAt = dt.datetime.now(dt.timezone.utc).isoformat()
-    db.collection(CONVERSATIONS_COLLECTION).document(conversation.chatId).set(
-        conversation.model_dump(exclude={"id"})
-    )
-
-
-def _send_and_record(conversation: Conversation, text: str) -> None:
-    if not text:
-        return
-    send_message(conversation.chatId, text)
-    conversation.messages.append(
-        Message(role="agent", text=text, timestamp=dt.datetime.now(dt.timezone.utc).isoformat())
-    )
-    send_conversation_message(f"🤖 {text}", conversation.telegramThreadId)
 
 
 @router.post("/webhook/avito")
@@ -88,52 +37,9 @@ async def avito_webhook(request: Request):
         # передавать в Claude и нечего сохранять как реплику гостя.
         return {"ok": True}
 
-    conversation = _get_or_create_conversation(chat_id, parsed.get("item_id"), own_user_id)
-
-    guest_message = Message(
-        role="guest",
-        text=text,
-        timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),
-        imageUrl=image_url,
+    conversation = get_or_create_conversation(
+        "avito", chat_id, parsed.get("item_id"), lambda: get_guest_name(chat_id, own_user_id)
     )
-    conversation.messages.append(guest_message)
-    send_conversation_message(
-        f"👤 {text}" + (f"\n📎 {image_url}" if image_url else ""), conversation.telegramThreadId
-    )
-
-    agent_settings = get_agent_settings()
-    allowed_items = {str(i) for i in agent_settings.get("allowedItemIds") or []}
-    item_id = parsed.get("item_id")
-    item_allowed = not allowed_items or (item_id is not None and str(item_id) in allowed_items)
-
-    if not agent_settings.get("isActive", True) or not item_allowed:
-        # Бот на паузе, либо это объявление не выбрано для автоответов —
-        # сообщение гостя всё равно сохранено и видно в Telegram-теме,
-        # но агент не отвечает — ждёт ручной реакции администратора.
-        _save_conversation(conversation)
-        return {"ok": True}
-
-    if conversation.activeScenarioId:
-        outgoing = continue_scenario(conversation, text, image_url)
-    else:
-        scenario = find_matching_scenario(text)
-        if scenario:
-            outgoing = start_scenario(conversation, scenario)
-        else:
-            reply_text, should_escalate, reason = generate_reply(conversation.messages)
-            outgoing = [reply_text] if reply_text else []
-            if should_escalate:
-                conversation.status = "escalated"
-                notify_admin(
-                    "⚠️ Диалог требует внимания администратора\n\n"
-                    f"Гость: {conversation.guestName or 'без имени'}\n"
-                    f"Причина: {reason}\n"
-                    f"Сообщение: {text}\n"
-                    f"Чат: {chat_id}"
-                )
-
-    for message_text in outgoing:
-        _send_and_record(conversation, message_text)
-
-    _save_conversation(conversation)
+    process_guest_message("avito", conversation, text, image_url)
+    save_conversation("avito", conversation)
     return {"ok": True}

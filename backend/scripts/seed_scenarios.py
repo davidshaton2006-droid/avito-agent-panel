@@ -11,7 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: E402
 
-from app.firestore_db import SCENARIOS_COLLECTION, get_db  # noqa: E402
+from app.firestore_db import get_db, scenarios_collection  # noqa: E402
+
+CHANNEL = "avito"
 
 PAYMENT_SCENARIO = {
     "scenarioId": "payment_confirmation",
@@ -31,7 +33,7 @@ PAYMENT_SCENARIO = {
 
 def main():
     db = get_db()
-    collection = db.collection(SCENARIOS_COLLECTION)
+    collection = db.collection(scenarios_collection(CHANNEL))
 
     existing = list(
         collection.where(filter=FieldFilter("scenarioId", "==", PAYMENT_SCENARIO["scenarioId"])).limit(1).stream()

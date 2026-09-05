@@ -7,7 +7,7 @@ import anthropic
 from app.agent_settings import get_agent_settings
 from app.travelline_pms import check_availability
 from app.config import get_settings
-from app.firestore_db import KNOWLEDGE_BASE_COLLECTION, get_db
+from app.firestore_db import Channel, get_db, knowledge_base_collection
 from app.models import Message
 
 log = logging.getLogger("claude-agent")
@@ -132,9 +132,9 @@ check_availability, чтобы посмотреть реальную досту�
 """
 
 
-def _load_knowledge_base_text(free_text: str) -> str:
+def _load_knowledge_base_text(channel: Channel, free_text: str) -> str:
     db = get_db()
-    docs = db.collection(KNOWLEDGE_BASE_COLLECTION).stream()
+    docs = db.collection(knowledge_base_collection(channel)).stream()
     pairs = []
     for doc in docs:
         data = doc.to_dict()
@@ -157,8 +157,8 @@ def _load_knowledge_base_text(free_text: str) -> str:
     return "\n\n" + "\n\n".join(sections)
 
 
-def _build_system_prompt() -> str:
-    profile = get_agent_settings()
+def _build_system_prompt(channel: Channel) -> str:
+    profile = get_agent_settings(channel)
     today = dt.date.today().isoformat()
 
     header = (
@@ -167,7 +167,7 @@ def _build_system_prompt() -> str:
         f"Товары/услуги: {profile['products']}\n\n"
         f"{profile['goal']}\n\n"
     )
-    return header + STATIC_FACTS + _load_knowledge_base_text(profile.get("knowledgeBaseText", ""))
+    return header + STATIC_FACTS + _load_knowledge_base_text(channel, profile.get("knowledgeBaseText", ""))
 
 
 TOOLS = [
@@ -208,7 +208,7 @@ def _history_to_claude_messages(messages: list[Message]) -> list[dict]:
     return result
 
 
-def generate_reply(messages: list[Message]) -> tuple[str, bool, str | None]:
+def generate_reply(channel: Channel, messages: list[Message]) -> tuple[str, bool, str | None]:
     """
     Returns (reply_text_for_guest, should_escalate, escalate_reason).
     The [ESCALATE] marker is stripped before the text is sent to the guest.
@@ -216,7 +216,7 @@ def generate_reply(messages: list[Message]) -> tuple[str, bool, str | None]:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)
 
-    system_prompt = _build_system_prompt()
+    system_prompt = _build_system_prompt(channel)
     claude_messages = _history_to_claude_messages(messages)
 
     raw_text = ""

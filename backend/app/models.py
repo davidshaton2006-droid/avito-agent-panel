@@ -59,6 +59,26 @@ class Scenario(BaseModel):
     updatedAt: Optional[str] = None
 
 
+class AgentSettings(BaseModel):
+    isActive: bool = True
+    name: str
+    company: str
+    products: str
+    goal: str
+    knowledgeBaseText: str = ""
+    allowedItemIds: list[str] = Field(default_factory=list)
+
+
+class AgentSettingsUpdate(BaseModel):
+    isActive: Optional[bool] = None
+    name: Optional[str] = None
+    company: Optional[str] = None
+    products: Optional[str] = None
+    goal: Optional[str] = None
+    knowledgeBaseText: Optional[str] = None
+    allowedItemIds: Optional[list[str]] = None
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str

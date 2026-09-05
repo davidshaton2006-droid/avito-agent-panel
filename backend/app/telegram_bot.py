@@ -1,10 +1,14 @@
 """
 Интерактивное Telegram-меню для управления агентом прямо из чата
 «Романтик Агент»: профиль (имя/компания/товары/цель), база знаний
-(свободный текст), пауза/резюме, выбор объявлений, баланс ProxyAPI.
+(свободный текст), пауза/резюме, выбор объявлений (Avito), баланс ProxyAPI.
 
 Работает через Telegram Bot API webhook (POST /webhook/telegram),
 регистрируется один раз через setWebhook (см. README).
+
+Поддерживает несколько каналов (Avito, Instagram, ...) — любое действие
+редактирования начинается с выбора канала, дальше меню то же самое,
+просто скопировано на данные этого канала.
 """
 
 import logging
@@ -14,9 +18,18 @@ import requests
 from app.agent_settings import get_agent_settings, update_agent_settings
 from app.avito_client import list_items
 from app.config import get_settings
-from app.firestore_db import CONVERSATIONS_COLLECTION, KNOWLEDGE_BASE_COLLECTION, TELEGRAM_STATE_COLLECTION, get_db
+from app.firestore_db import (
+    CHANNELS,
+    Channel,
+    conversations_collection,
+    get_db,
+    knowledge_base_collection,
+    telegram_state_collection,
+)
 
 log = logging.getLogger("telegram-bot")
+
+CHANNEL_LABELS: dict[Channel, str] = {"avito": "🅰️ Avito", "instagram": "📷 Instagram"}
 
 FIELD_LABELS = {
     "name": "Имя",
@@ -25,6 +38,10 @@ FIELD_LABELS = {
     "goal": "Цель общения",
     "knowledgeBaseText": "База знаний (свободный текст)",
 }
+
+# У какого документа хранится состояние ожидания ввода — общее для бота
+# (один администратор, один личный чат), не по каналу.
+_STATE_DOC_ID = "state"
 
 
 def _api(method: str, payload: dict) -> dict:
@@ -37,27 +54,46 @@ def _api(method: str, payload: dict) -> dict:
     return response.json()
 
 
-def _get_awaiting(chat_id: int) -> str | None:
+def _get_awaiting(chat_id: int) -> dict | None:
     db = get_db()
-    doc = db.collection(TELEGRAM_STATE_COLLECTION).document(str(chat_id)).get()
+    doc = db.collection(telegram_state_collection("avito")).document(str(chat_id)).get()
     if doc.exists:
         return (doc.to_dict() or {}).get("awaiting")
     return None
 
 
-def _set_awaiting(chat_id: int, awaiting: str | None) -> None:
+def _set_awaiting(chat_id: int, awaiting: dict | None) -> None:
     db = get_db()
-    db.collection(TELEGRAM_STATE_COLLECTION).document(str(chat_id)).set({"awaiting": awaiting})
+    db.collection(telegram_state_collection("avito")).document(str(chat_id)).set({"awaiting": awaiting})
 
 
-def _status_summary() -> dict:
-    settings_doc = get_agent_settings()
+# --- Экран выбора канала -----------------------------------------------
+
+
+def _channel_picker() -> tuple[str, dict]:
+    text = "Выберите канал для настройки:"
+    markup = {
+        "inline_keyboard": [[{"text": CHANNEL_LABELS[ch], "callback_data": f"channel:{ch}"}] for ch in CHANNELS]
+    }
+    return text, markup
+
+
+def _send_channel_picker(chat_id: int) -> None:
+    text, markup = _channel_picker()
+    _api("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": markup})
+
+
+# --- Главное меню канала -------------------------------------------------
+
+
+def _status_summary(channel: Channel) -> dict:
+    settings_doc = get_agent_settings(channel)
     db = get_db()
 
-    conversations = list(db.collection(CONVERSATIONS_COLLECTION).stream())
+    conversations = list(db.collection(conversations_collection(channel)).stream())
     message_count = sum(len((c.to_dict() or {}).get("messages", [])) for c in conversations)
 
-    has_qa_pairs = bool(list(db.collection(KNOWLEDGE_BASE_COLLECTION).limit(1).stream()))
+    has_qa_pairs = bool(list(db.collection(knowledge_base_collection(channel)).limit(1).stream()))
     kb_filled = has_qa_pairs or bool((settings_doc.get("knowledgeBaseText") or "").strip())
 
     allowed = settings_doc.get("allowedItemIds") or []
@@ -70,50 +106,64 @@ def _status_summary() -> dict:
     }
 
 
-def _main_menu() -> tuple[str, dict]:
-    status = _status_summary()
+def _main_menu(channel: Channel) -> tuple[str, dict]:
+    status = _status_summary(channel)
     status_icon = "🟢" if status["isActive"] else "⏸️"
     text = (
+        f"{CHANNEL_LABELS[channel]}\n"
         f"{status_icon} Нейроагент «Романтик»\n\n"
         f"Сообщений: {status['message_count']}\n"
-        f"Объявления: {status['items_label']}\n"
-        f"База знаний: {'✅ заполнена' if status['kb_filled'] else '❌ пусто'}"
     )
+    if channel == "avito":
+        text += f"Объявления: {status['items_label']}\n"
+    text += f"База знаний: {'✅ заполнена' if status['kb_filled'] else '❌ пусто'}"
+
     pause_button = (
-        {"text": "▶️ Возобновить бота", "callback_data": "toggle_active"}
+        {"text": "▶️ Возобновить бота", "callback_data": f"toggle_active:{channel}"}
         if not status["isActive"]
-        else {"text": "⏸ Приостановить бота", "callback_data": "toggle_active"}
+        else {"text": "⏸ Приостановить бота", "callback_data": f"toggle_active:{channel}"}
     )
-    markup = {
-        "inline_keyboard": [
-            [{"text": "🏷 Имя", "callback_data": "edit:name"}, {"text": "🏢 Компания", "callback_data": "edit:company"}],
-            [
-                {"text": "🛍 Товары/услуги", "callback_data": "edit:products"},
-                {"text": "🎯 Цель общения", "callback_data": "edit:goal"},
-            ],
-            [
-                {"text": "📚 База знаний", "callback_data": "edit:knowledgeBaseText"},
-                {"text": "📌 Выбрать объявления", "callback_data": "items"},
-            ],
-            [{"text": "💰 Баланс ProxyAPI", "callback_data": "balance"}],
-            [pause_button],
-        ]
-    }
-    return text, markup
+
+    rows = [
+        [
+            {"text": "🏷 Имя", "callback_data": f"edit:{channel}:name"},
+            {"text": "🏢 Компания", "callback_data": f"edit:{channel}:company"},
+        ],
+        [
+            {"text": "🛍 Товары/услуги", "callback_data": f"edit:{channel}:products"},
+            {"text": "🎯 Цель общения", "callback_data": f"edit:{channel}:goal"},
+        ],
+        [{"text": "📚 База знаний", "callback_data": f"edit:{channel}:knowledgeBaseText"}],
+    ]
+    if channel == "avito":
+        rows.append([{"text": "📌 Выбрать объявления", "callback_data": f"items:{channel}"}])
+    rows.append([{"text": "💰 Баланс ProxyAPI", "callback_data": "balance"}])
+    rows.append([pause_button])
+    rows.append([{"text": "🔙 Сменить канал", "callback_data": "channels"}])
+
+    return text, {"inline_keyboard": rows}
 
 
-def _send_main_menu(chat_id: int) -> None:
-    text, markup = _main_menu()
+def _send_main_menu(chat_id: int, channel: Channel) -> None:
+    text, markup = _main_menu(channel)
     _api("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": markup})
 
 
-def _render_main_menu(chat_id: int, message_id: int) -> None:
-    text, markup = _main_menu()
+def _render_main_menu(chat_id: int, message_id: int, channel: Channel) -> None:
+    text, markup = _main_menu(channel)
     _api("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "reply_markup": markup})
 
 
-def _items_screen() -> tuple[str, dict]:
-    allowed = {str(i) for i in get_agent_settings().get("allowedItemIds") or []}
+def _render_channel_picker(chat_id: int, message_id: int) -> None:
+    text, markup = _channel_picker()
+    _api("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "reply_markup": markup})
+
+
+# --- Выбор объявлений (только Avito) -------------------------------------
+
+
+def _items_screen(channel: Channel) -> tuple[str, dict]:
+    allowed = {str(i) for i in get_agent_settings(channel).get("allowedItemIds") or []}
     try:
         items = list_items()
     except requests.RequestException:
@@ -125,11 +175,14 @@ def _items_screen() -> tuple[str, dict]:
         item_id = str(item.get("id"))
         checked = "✅" if item_id in allowed else "⬜"
         title = (item.get("title") or item_id)[:40]
-        rows.append([{"text": f"{checked} {title}", "callback_data": f"items_toggle:{item_id}"}])
-    rows.append([{"text": "🔙 Готово", "callback_data": "menu"}])
+        rows.append([{"text": f"{checked} {title}", "callback_data": f"items_toggle:{channel}:{item_id}"}])
+    rows.append([{"text": "🔙 Готово", "callback_data": f"menu:{channel}"}])
 
     text = "📌 Выберите объявления, на которые агент отвечает:\n(ничего не выбрано = отвечает на все)"
     return text, {"inline_keyboard": rows}
+
+
+# --- Баланс ProxyAPI (общий для всех каналов) -----------------------------
 
 
 def _handle_balance_request(callback_id: str) -> None:
@@ -158,6 +211,9 @@ def _handle_balance_request(callback_id: str) -> None:
     _api("answerCallbackQuery", {"callback_query_id": callback_id, "text": text, "show_alert": True})
 
 
+# --- Обработка нажатий кнопок ---------------------------------------------
+
+
 def _handle_callback(callback_query: dict) -> None:
     data = callback_query.get("data", "")
     message = callback_query.get("message", {})
@@ -169,40 +225,50 @@ def _handle_callback(callback_query: dict) -> None:
         _handle_balance_request(callback_id)
         return
 
-    if data == "menu":
-        _render_main_menu(chat_id, message_id)
+    if data == "channels":
+        _render_channel_picker(chat_id, message_id)
 
-    elif data == "toggle_active":
-        current = get_agent_settings().get("isActive", True)
-        update_agent_settings({"isActive": not current})
-        _render_main_menu(chat_id, message_id)
+    elif data.startswith("channel:"):
+        channel = data.split(":", 1)[1]
+        _render_main_menu(chat_id, message_id, channel)
 
-    elif data == "items":
-        text, markup = _items_screen()
-        _api("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "reply_markup": markup})
+    elif data.startswith("menu:"):
+        channel = data.split(":", 1)[1]
+        _render_main_menu(chat_id, message_id, channel)
+
+    elif data.startswith("toggle_active:"):
+        channel = data.split(":", 1)[1]
+        current = get_agent_settings(channel).get("isActive", True)
+        update_agent_settings(channel, {"isActive": not current})
+        _render_main_menu(chat_id, message_id, channel)
 
     elif data.startswith("items_toggle:"):
-        item_id = data.split(":", 1)[1]
-        allowed = {str(i) for i in get_agent_settings().get("allowedItemIds") or []}
+        _, channel, item_id = data.split(":", 2)
+        allowed = {str(i) for i in get_agent_settings(channel).get("allowedItemIds") or []}
         if item_id in allowed:
             allowed.discard(item_id)
         else:
             allowed.add(item_id)
-        update_agent_settings({"allowedItemIds": sorted(allowed)})
-        text, markup = _items_screen()
+        update_agent_settings(channel, {"allowedItemIds": sorted(allowed)})
+        text, markup = _items_screen(channel)
+        _api("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "reply_markup": markup})
+
+    elif data.startswith("items:"):
+        channel = data.split(":", 1)[1]
+        text, markup = _items_screen(channel)
         _api("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "reply_markup": markup})
 
     elif data.startswith("edit:"):
-        field = data.split(":", 1)[1]
-        _set_awaiting(chat_id, field)
-        current_value = get_agent_settings().get(field, "")
+        _, channel, field = data.split(":", 2)
+        _set_awaiting(chat_id, {"channel": channel, "field": field})
+        current_value = get_agent_settings(channel).get(field, "")
         label = FIELD_LABELS.get(field, field)
         _api(
             "sendMessage",
             {
                 "chat_id": chat_id,
                 "text": (
-                    f"✏️ {label}\n\nТекущее значение:\n{current_value or '(пусто)'}\n\n"
+                    f"{CHANNEL_LABELS[channel]} — ✏️ {label}\n\nТекущее значение:\n{current_value or '(пусто)'}\n\n"
                     "Пришлите новый текст следующим сообщением — это полностью заменит текущее значение."
                 ),
             },
@@ -217,19 +283,21 @@ def _handle_text_message(message: dict) -> None:
 
     if text in ("/start", "/menu"):
         _set_awaiting(chat_id, None)
-        _send_main_menu(chat_id)
+        _send_channel_picker(chat_id)
         return
 
     awaiting = _get_awaiting(chat_id)
     if awaiting:
-        update_agent_settings({awaiting: text})
+        channel = awaiting["channel"]
+        field = awaiting["field"]
+        update_agent_settings(channel, {field: text})
         _set_awaiting(chat_id, None)
-        label = FIELD_LABELS.get(awaiting, awaiting)
-        _api("sendMessage", {"chat_id": chat_id, "text": f"✅ «{label}» обновлено."})
-        _send_main_menu(chat_id)
+        label = FIELD_LABELS.get(field, field)
+        _api("sendMessage", {"chat_id": chat_id, "text": f"✅ {CHANNEL_LABELS[channel]} — «{label}» обновлено."})
+        _send_main_menu(chat_id, channel)
         return
 
-    _send_main_menu(chat_id)
+    _send_channel_picker(chat_id)
 
 
 def handle_update(update: dict) -> None:

@@ -1,7 +1,8 @@
 """
 Движок пошаговых сценариев (например «ОПЛАТИЛ» -> чек -> фамилия ->
-уведомление админу). Сценарии хранятся в avito_agent_scenarios и полностью
-настраиваются через админку — этот модуль просто исполняет шаги.
+уведомление админу). Сценарии хранятся в {channel}_agent_scenarios и
+полностью настраиваются через админку — этот модуль просто исполняет шаги.
+Работает одинаково для любого канала (Avito, Instagram, ...).
 
 Финальное подтверждение брони гостю НЕ отправляется автоматически —
 после notify_admin бот отправляет только "проверяем оплату", а
@@ -12,17 +13,16 @@ import logging
 
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from app.avito_client import get_chat_url, send_message
-from app.firestore_db import SCENARIOS_COLLECTION, get_db
+from app.firestore_db import Channel, get_db, scenarios_collection
 from app.models import Conversation, Scenario
 from app.telegram_notify import notify_admin
 
 log = logging.getLogger("scenario-engine")
 
 
-def find_matching_scenario(text: str) -> Scenario | None:
+def find_matching_scenario(channel: Channel, text: str) -> Scenario | None:
     db = get_db()
-    docs = db.collection(SCENARIOS_COLLECTION).where(filter=FieldFilter("isActive", "==", True)).stream()
+    docs = db.collection(scenarios_collection(channel)).where(filter=FieldFilter("isActive", "==", True)).stream()
     normalized = text.strip().lower()
     for doc in docs:
         data = doc.to_dict()
@@ -33,9 +33,9 @@ def find_matching_scenario(text: str) -> Scenario | None:
     return None
 
 
-def _get_scenario(scenario_id: str) -> Scenario | None:
+def _get_scenario(channel: Channel, scenario_id: str) -> Scenario | None:
     db = get_db()
-    doc = db.collection(SCENARIOS_COLLECTION).document(scenario_id).get()
+    doc = db.collection(scenarios_collection(channel)).document(scenario_id).get()
     if not doc.exists:
         return None
     data = doc.to_dict()
@@ -43,21 +43,21 @@ def _get_scenario(scenario_id: str) -> Scenario | None:
     return Scenario(**data)
 
 
-def start_scenario(conversation: Conversation, scenario: Scenario) -> list[str]:
+def start_scenario(channel: Channel, conversation: Conversation, scenario: Scenario) -> list[str]:
     """Starts a scenario on a conversation, running steps until one that
     waits on guest input. Returns guest-facing message texts to send."""
     conversation.activeScenarioId = scenario.id
     conversation.activeStepIndex = 0
     conversation.scenarioData = {}
-    return _run_from_current_step(conversation, scenario)
+    return _run_from_current_step(channel, conversation, scenario)
 
 
 def continue_scenario(
-    conversation: Conversation, incoming_text: str, incoming_image_url: str | None
+    channel: Channel, conversation: Conversation, incoming_text: str, incoming_image_url: str | None
 ) -> list[str]:
     """Advances a conversation that is mid-scenario, given the guest's latest
     message. Returns guest-facing message texts to send."""
-    scenario = _get_scenario(conversation.activeScenarioId)
+    scenario = _get_scenario(channel, conversation.activeScenarioId)
     if scenario is None:
         conversation.activeScenarioId = None
         conversation.activeStepIndex = None
@@ -86,10 +86,10 @@ def continue_scenario(
         return []
 
     conversation.activeStepIndex = step_index + 1
-    return _run_from_current_step(conversation, scenario)
+    return _run_from_current_step(channel, conversation, scenario)
 
 
-def _run_from_current_step(conversation: Conversation, scenario: Scenario) -> list[str]:
+def _run_from_current_step(channel: Channel, conversation: Conversation, scenario: Scenario) -> list[str]:
     outgoing: list[str] = []
     while True:
         step_index = conversation.activeStepIndex or 0
@@ -107,7 +107,7 @@ def _run_from_current_step(conversation: Conversation, scenario: Scenario) -> li
             continue
 
         if step.type == "notify_admin":
-            _send_admin_notification(conversation)
+            _send_admin_notification(channel, conversation)
             conversation.activeStepIndex = step_index + 1
             continue
 
@@ -118,21 +118,26 @@ def _run_from_current_step(conversation: Conversation, scenario: Scenario) -> li
     return outgoing
 
 
-def _send_admin_notification(conversation: Conversation) -> None:
+def _get_chat_url(channel: Channel, chat_id: str) -> str | None:
+    if channel == "avito":
+        from app.avito_client import get_chat_url
+
+        return get_chat_url(chat_id)
+    return None
+
+
+def _send_admin_notification(channel: Channel, conversation: Conversation) -> None:
     guest_name = conversation.guestName or "гость без имени"
     surname = conversation.scenarioData.get("bookingSurname", "не указана")
     receipt_url = conversation.scenarioData.get("paymentReceiptUrl", "нет ссылки")
-    chat_url = get_chat_url(conversation.chatId)
+    chat_url = _get_chat_url(channel, conversation.chatId)
 
     text = (
         "💰 Новая оплата ожидает подтверждения\n\n"
+        f"Канал: {channel}\n"
         f"Гость: {guest_name}\n"
         f"Фамилия для брони: {surname}\n"
-        f"Чат Avito: {chat_url}\n"
-        f"Фото чека: {receipt_url}"
+        + (f"Чат: {chat_url}\n" if chat_url else f"Chat ID: {conversation.chatId}\n")
+        + f"Фото чека: {receipt_url}"
     )
     notify_admin(text)
-
-
-def send_to_guest(chat_id: str, text: str) -> None:
-    send_message(chat_id, text)
