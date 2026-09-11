@@ -91,8 +91,11 @@ def process_guest_message(channel: Channel, conversation: Conversation, text: st
 
     agent_settings = get_agent_settings(channel)
     allowed_items = {str(i) for i in agent_settings.get("allowedItemIds") or []}
-    item_allowed = not allowed_items or (
-        conversation.itemId is not None and str(conversation.itemId) in allowed_items
+    # Чаты без привязки к объявлению (например, u2u-переписки на Avito, начатые
+    # не с карточки товара) не блокируются фильтром объявлений — блокируем
+    # только явно НЕ выбранные объявления.
+    item_allowed = (
+        not allowed_items or conversation.itemId is None or str(conversation.itemId) in allowed_items
     )
 
     if not agent_settings.get("isActive", True) or not item_allowed:
