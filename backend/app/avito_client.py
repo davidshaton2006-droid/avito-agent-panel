@@ -174,12 +174,14 @@ def parse_webhook_payload(raw: dict) -> dict:
         item = content.get("item") or {}
         text = f"{item.get('title', '')} {item.get('item_url', '')}".strip()
 
+    item_id = value.get("item_id")
+
     return {
         "chat_id": value.get("chat_id"),
         "text": text,
         "author_id": value.get("author_id"),
         "own_user_id": value.get("user_id"),
-        "item_id": value.get("item_id"),
+        "item_id": str(item_id) if item_id is not None else None,
         "message_type": message_type,
         "image_url": image_url,
     }
