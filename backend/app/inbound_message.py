@@ -73,16 +73,37 @@ def _send_and_record(channel: Channel, conversation: Conversation, text: str) ->
     send_conversation_message(f"🤖 {text}", conversation.telegramThreadId)
 
 
-def process_guest_message(channel: Channel, conversation: Conversation, text: str, image_url: str | None) -> None:
+_DEDUP_LOOKBACK = 5
+
+
+def process_guest_message(
+    channel: Channel,
+    conversation: Conversation,
+    text: str,
+    image_url: str | None,
+    message_id: str | None = None,
+) -> None:
     """Records the guest message, mirrors it to Telegram, then — unless the
     agent is paused or this listing isn't in the allowlist — runs the
     scenario engine or Claude and sends+records any replies. Caller persists
-    the conversation afterwards via save_conversation()."""
+    the conversation afterwards via save_conversation().
+
+    `message_id` is the channel's own id for this message (Avito/Instagram).
+    Channels like Avito retry webhook delivery a few times if the server is
+    slow to answer — without this check, each retry would append another
+    guest message and trigger another (near-duplicate) agent reply."""
+    if message_id and any(
+        m.role == "guest" and m.externalId == message_id for m in conversation.messages[-_DEDUP_LOOKBACK:]
+    ):
+        log.info("Повторная доставка сообщения %s — игнорируем (уже обработано)", message_id)
+        return
+
     guest_message = Message(
         role="guest",
         text=text,
         timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),
         imageUrl=image_url,
+        externalId=message_id,
     )
     conversation.messages.append(guest_message)
     send_conversation_message(

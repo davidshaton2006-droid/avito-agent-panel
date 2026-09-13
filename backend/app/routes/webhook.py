@@ -40,6 +40,6 @@ async def avito_webhook(request: Request):
     conversation = get_or_create_conversation(
         "avito", chat_id, parsed.get("item_id"), lambda: get_guest_name(chat_id, own_user_id)
     )
-    process_guest_message("avito", conversation, text, image_url)
+    process_guest_message("avito", conversation, text, image_url, parsed.get("message_id"))
     save_conversation("avito", conversation)
     return {"ok": True}

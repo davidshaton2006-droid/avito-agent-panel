@@ -44,6 +44,6 @@ async def instagram_webhook(request: Request):
     conversation = get_or_create_conversation(
         "instagram", chat_id, None, lambda: get_guest_name(chat_id)
     )
-    process_guest_message("instagram", conversation, text, image_url)
+    process_guest_message("instagram", conversation, text, image_url, parsed.get("message_id"))
     save_conversation("instagram", conversation)
     return {"ok": True}

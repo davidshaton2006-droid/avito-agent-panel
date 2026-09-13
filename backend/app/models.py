@@ -20,6 +20,10 @@ class Message(BaseModel):
     text: str
     timestamp: str
     imageUrl: Optional[str] = None
+    # Id of the source message on the channel (Avito/Instagram) — used to
+    # detect and ignore duplicate webhook deliveries (e.g. Avito retries the
+    # same webhook a few times if the server is slow to respond).
+    externalId: Optional[str] = None
 
 
 class Conversation(BaseModel):

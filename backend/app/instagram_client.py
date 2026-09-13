@@ -109,6 +109,7 @@ def parse_webhook_payload(raw: dict) -> dict | None:
 
             return {
                 "chat_id": sender_id,
+                "message_id": message.get("mid"),
                 "text": text,
                 "author_id": sender_id,
                 "own_user_id": settings.instagram_ig_user_id,

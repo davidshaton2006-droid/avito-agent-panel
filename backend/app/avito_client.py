@@ -178,6 +178,7 @@ def parse_webhook_payload(raw: dict) -> dict:
 
     return {
         "chat_id": value.get("chat_id"),
+        "message_id": value.get("id"),
         "text": text,
         "author_id": value.get("author_id"),
         "own_user_id": value.get("user_id"),
