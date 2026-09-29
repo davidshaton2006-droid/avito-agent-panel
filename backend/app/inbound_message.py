@@ -109,6 +109,11 @@ def process_guest_message(
     send_conversation_message(
         f"👤 {text}" + (f"\n📎 {image_url}" if image_url else ""), conversation.telegramThreadId
     )
+    # Сохраняем СРАЗУ, до генерации ответа — если дальше упадёт Claude/канал
+    # (например, кончился баланс ProxyAPI), повторная доставка того же
+    # сообщения от Avito/Instagram уже увидит его как обработанное и не
+    # перешлёт гостевое сообщение в Telegram второй раз.
+    save_conversation(channel, conversation)
 
     agent_settings = get_agent_settings(channel)
     allowed_items = {str(i) for i in agent_settings.get("allowedItemIds") or []}
@@ -125,25 +130,43 @@ def process_guest_message(
         # но агент не отвечает — ждёт ручной реакции администратора.
         return
 
-    if conversation.activeScenarioId:
-        outgoing = continue_scenario(channel, conversation, text, image_url)
-    else:
-        scenario = find_matching_scenario(channel, text)
-        if scenario:
-            outgoing = start_scenario(channel, conversation, scenario)
+    try:
+        if conversation.activeScenarioId:
+            outgoing = continue_scenario(channel, conversation, text, image_url)
         else:
-            reply_text, should_escalate, reason = generate_reply(channel, conversation.messages)
-            outgoing = [reply_text] if reply_text else []
-            if should_escalate:
-                conversation.status = "escalated"
-                notify_admin(
-                    "⚠️ Диалог требует внимания администратора\n\n"
-                    f"Канал: {channel}\n"
-                    f"Гость: {conversation.guestName or 'без имени'}\n"
-                    f"Причина: {reason}\n"
-                    f"Сообщение: {text}\n"
-                    f"Чат: {conversation.chatId}"
-                )
+            scenario = find_matching_scenario(channel, text)
+            if scenario:
+                outgoing = start_scenario(channel, conversation, scenario)
+            else:
+                reply_text, should_escalate, reason = generate_reply(channel, conversation.messages)
+                outgoing = [reply_text] if reply_text else []
+                if should_escalate:
+                    conversation.status = "escalated"
+                    notify_admin(
+                        "⚠️ Диалог требует внимания администратора\n\n"
+                        f"Канал: {channel}\n"
+                        f"Гость: {conversation.guestName or 'без имени'}\n"
+                        f"Причина: {reason}\n"
+                        f"Сообщение: {text}\n"
+                        f"Чат: {conversation.chatId}"
+                    )
+    except Exception:
+        # Сообщение гостя уже сохранено и видно в Telegram-теме выше — не
+        # даём сбою генерации ответа (например, кончился баланс ProxyAPI)
+        # уронить весь вебхук: это привело бы к повторной доставке от
+        # Avito/Instagram и повторной пересылке того же сообщения гостя.
+        # Вместо этого просто уведомляем администратора и молча пропускаем
+        # автоответ — гость получит ответ вручную.
+        log.exception("Не удалось сгенерировать/отправить ответ гостю в чате %s", conversation.chatId)
+        notify_admin(
+            "⚠️ Не удалось автоматически ответить гостю (ошибка агента)\n\n"
+            f"Канал: {channel}\n"
+            f"Гость: {conversation.guestName or 'без имени'}\n"
+            f"Сообщение: {text}\n"
+            f"Чат: {conversation.chatId}\n"
+            "Ответьте, пожалуйста, вручную."
+        )
+        return
 
     for message_text in outgoing:
         _send_and_record(channel, conversation, message_text)
