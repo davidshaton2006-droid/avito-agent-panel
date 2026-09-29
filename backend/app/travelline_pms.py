@@ -42,6 +42,49 @@ _rooms_cache: dict = {"rooms": None, "expires_at": 0}
 
 ROOMS_CACHE_SECONDS = 1800  # физический номерной фонд меняется очень редко
 
+# Плановые закрытия базы (например, на техобслуживание отопления) — это
+# ручные блокировки в календаре TravelLine, которые PMS API НЕ показывает
+# (только реальные бронирования), поэтому считаем их отдельно здесь, а не
+# полагаемся на модель, чтобы удержать их в голове из текста промпта.
+# Формат: (дата начала, дата конца) — обе включительно, это ночи, в которые
+# база закрыта для гостей. Обновляйте этот список при новых объявлениях о
+# техобслуживании.
+CLOSURES: list[tuple[dt.date, dt.date]] = [
+    (dt.date(2026, 9, 27), dt.date(2026, 10, 1)),
+    (dt.date(2026, 10, 4), dt.date(2026, 10, 8)),
+    (dt.date(2026, 10, 11), dt.date(2026, 10, 15)),
+]
+
+WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+WEEKDAY_RATE = 7000  # Пн-Чт
+WEEKEND_RATE = 9000  # Пт-Вс
+
+
+def _night_rate(night: dt.date) -> int:
+    return WEEKEND_RATE if night.weekday() >= 4 else WEEKDAY_RATE  # 4=пт, 5=сб, 6=вс
+
+
+def _price_breakdown(start: dt.date, end: dt.date) -> tuple[list[dict], int]:
+    nights = []
+    total = 0
+    d = start
+    while d < end:
+        rate = _night_rate(d)
+        nights.append({"date": d.isoformat(), "weekday_ru": WEEKDAY_RU[d.weekday()], "rate": rate})
+        total += rate
+        d += dt.timedelta(days=1)
+    return nights, total
+
+
+def _closed_nights(start: dt.date, end: dt.date) -> list[str]:
+    closed = []
+    d = start
+    while d < end:
+        if any(closure_start <= d <= closure_end for closure_start, closure_end in CLOSURES):
+            closed.append(d.isoformat())
+        d += dt.timedelta(days=1)
+    return closed
+
 
 def _get_token() -> str:
     if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - 60:
@@ -146,11 +189,17 @@ def _dates_overlap(a_start: str, a_end: str, b_start: str, b_end: str) -> bool:
 
 
 def check_availability(check_in: str, check_out: str) -> dict:
-    """Считает реально свободные домики по каждому типу через PMS API.
+    """Считает реально свободные домики по каждому типу через PMS API, плюс
+    плановые закрытия и цену по ночам (чтобы модель не считала день недели
+    сама — она в этом регулярно ошибается).
 
     Возвращает {"available_two_seat", "available_three_seat", "total_two_seat",
-    "total_three_seat"} либо {"error": "..."} при некорректных датах или
-    недоступности API (например, если PMS API не включён на тарифе).
+    "total_three_seat", "nights" (список {date, weekday_ru, rate}),
+    "total_price_per_domik" (сумма rate по ночам, ОДИН домик, без доплат за
+    детей), "closed_nights" (список ISO-дат из плановых закрытий — если
+    непусто, эти конкретные ночи недоступны, ДАЖЕ если available_* больше 0,
+    так как эти закрытия не бронирования и PMS API их не видит)}
+    либо {"error": "..."} при некорректных датах или недоступности API.
     """
     try:
         start = dt.date.fromisoformat(check_in)
@@ -159,6 +208,9 @@ def check_availability(check_in: str, check_out: str) -> dict:
         return {"error": "Некорректные даты: нужен формат YYYY-MM-DD"}
     if start >= end:
         return {"error": "Дата заезда должна быть раньше даты выезда"}
+
+    nights, total_price = _price_breakdown(start, end)
+    closed_nights = _closed_nights(start, end)
 
     try:
         rooms = _get_rooms()
@@ -192,7 +244,15 @@ def check_availability(check_in: str, check_out: str) -> dict:
             "available_three_seat": max(0, total_three_seat - len(occupied_three_seat)),
             "total_two_seat": total_two_seat,
             "total_three_seat": total_three_seat,
+            "nights": nights,
+            "total_price_per_domik": total_price,
+            "closed_nights": closed_nights,
         }
     except requests.RequestException:
         log.exception("Ошибка запроса к TravelLine PMS API")
-        return {"error": "Не удалось получить данные от TravelLine PMS API"}
+        return {
+            "error": "Не удалось получить данные от TravelLine PMS API",
+            "nights": nights,
+            "total_price_per_domik": total_price,
+            "closed_nights": closed_nights,
+        }
